@@ -1,0 +1,512 @@
+import os
+import json
+import datetime
+from telebot import TeleBot, types
+from telebot.util import quick_markup
+
+# Константы
+BOT_TOKEN = "8354515031:AAEnTTa0qdU8teKjwMv373llShkM4alH62Q"
+ADMIN_GROUP_ID = -5026479411
+CHANNEL_ID = -1002658375841
+POSTS_FILE = "posts.json"
+
+# Инициализация бота
+bot = TeleBot(BOT_TOKEN)
+
+# Загрузка данных из JSON
+def load_posts():
+    if os.path.exists(POSTS_FILE):
+        with open(POSTS_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            # Проверяем структуру данных и исправляем если нужно
+            if isinstance(data, list):
+                # Конвертируем старую структуру в новую
+                data = {"posts": {}, "user_states": {}}
+                save_posts(data)
+            return data
+    return {"posts": {}, "user_states": {}}
+
+# Сохранение данных в JSON
+def save_posts(data):
+    with open(POSTS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+# Генерация ID поста
+def generate_post_id():
+    data = load_posts()
+    if not data["posts"]:
+        return 1
+    return max([int(i) for i in data["posts"].keys()]) + 1
+
+# Главное меню
+def main_menu():
+    return quick_markup({
+        '📝 Отправить пост': {'callback_data': 'send_post'},
+        '📂 Мои посты': {'callback_data': 'my_posts'}
+    }, row_width=1)
+
+# Меню после публикации
+def after_publish_menu():
+    return quick_markup({
+        '📝 Отправить новый пост': {'callback_data': 'send_post'},
+        '📂 Мои посты': {'callback_data': 'my_posts'}
+    }, row_width=1)
+
+# Кнопки модерации
+def moderation_buttons(post_id):
+    return quick_markup({
+        '✅ Принять': {'callback_data': f'approve_{post_id}'},
+        '❌ Отклонить': {'callback_data': f'reject_{post_id}'},
+        '🚫 Заблокировать': {'callback_data': f'ban_{post_id}'}
+    }, row_width=2)
+
+# Кнопки модерации с разблокировкой
+def moderation_buttons_unban(post_id):
+    return quick_markup({
+        '✅ Принять': {'callback_data': f'approve_{post_id}'},
+        '❌ Отклонить': {'callback_data': f'reject_{post_id}'},
+        '✅ Разблокировать': {'callback_data': f'unban_{post_id}'}
+    }, row_width=2)
+
+# Обработчик команды /start
+@bot.message_handler(commands=['start'])
+def start_command(message):
+    bot.send_message(
+        message.chat.id,
+        "👋 Добро пожаловать в бот-предложку!\n\n"
+        "Здесь вы можете предложить пост для публикации в канале.",
+        reply_markup=main_menu()
+    )
+
+# Обработчик команды /post{id}
+@bot.message_handler(regexp=r'^/post\d+$')
+def show_post(message):
+    data = load_posts()
+    post_id = message.text.replace('/post', '')
+    
+    if post_id not in data["posts"]:
+        bot.send_message(message.chat.id, "❌ Пост не найден.")
+        return
+    
+    post = data["posts"][post_id]
+    
+    if str(post["user_id"]) != str(message.from_user.id):
+        bot.send_message(message.chat.id, "❌ Это не ваш пост.")
+        return
+    
+    # Отправка медиа в зависимости от типа
+    if post["media_type"] == "text":
+        bot.send_message(message.chat.id, f"📝 Текст поста:\n\n{post['text']}")
+    
+    elif post["media_type"] == "photo":
+        bot.send_photo(message.chat.id, post["file_id"], caption=post["text"])
+    
+    elif post["media_type"] == "video":
+        bot.send_video(message.chat.id, post["file_id"], caption=post["text"])
+    
+    elif post["media_type"] == "sticker":
+        bot.send_sticker(message.chat.id, post["file_id"])
+        if post["text"]:
+            bot.send_message(message.chat.id, f"📝 Подпись:\n\n{post['text']}")
+    
+    elif post["media_type"] == "voice":
+        bot.send_voice(message.chat.id, post["file_id"], caption=post["text"])
+    
+    elif post["media_type"] == "video_note":
+        bot.send_video_note(message.chat.id, post["file_id"])
+        if post["text"]:
+            bot.send_message(message.chat.id, f"📝 Подпись:\n\n{post['text']}")
+    
+    elif post["media_type"] == "media_group":
+        if post["text"]:
+            bot.send_message(message.chat.id, f"📝 Подпись альбома:\n\n{post['text']}")
+        else:
+            bot.send_message(message.chat.id, "📷 Медиа-альбом (без подписи)")
+
+# Обработчик callback-запросов
+@bot.callback_query_handler(func=lambda call: True)
+def callback_handler(call):
+    data = load_posts()
+    user_id = call.from_user.id
+    
+    # Проверяем структуру данных
+    if "user_states" not in data:
+        data["user_states"] = {}
+    if "posts" not in data:
+        data["posts"] = {}
+    
+    if call.data == 'send_post':
+        if str(user_id) in data.get("user_states", {}) and data["user_states"].get(str(user_id)) == "banned":
+            bot.answer_callback_query(call.id, "❌ Вы заблокированы и не можете отправлять посты.")
+            return
+        
+        bot.send_message(
+            call.message.chat.id,
+            "📤 Отправьте ваш пост (текст, фото, видео, стикер, голосовое сообщение или видео-заметку):"
+        )
+        bot.answer_callback_query(call.id)
+    
+    elif call.data == 'my_posts':
+        user_posts = []
+        for post_id, post in data["posts"].items():
+            if str(post["user_id"]) == str(user_id):
+                status_emoji = {
+                    "approved": "✅",
+                    "rejected": "❌", 
+                    "pending": "⏳"
+                }.get(post["status"], "⏳")
+                
+                date = post.get("date", "Неизвестно")
+                user_posts.append(f"🆔 /post{post_id} — {status_emoji} {post['status']} ({date})")
+        
+        if user_posts:
+            bot.edit_message_text(
+                "\n".join(user_posts),
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=quick_markup({'🔙 Назад': {'callback_data': 'back_to_main'}})
+            )
+        else:
+            bot.edit_message_text(
+                "📭 У вас пока нет постов.",
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=quick_markup({'🔙 Назад': {'callback_data': 'back_to_main'}})
+            )
+        bot.answer_callback_query(call.id)
+    
+    elif call.data == 'back_to_main':
+        bot.edit_message_text(
+            "👋 Добро пожаловать в бот-предложку!\n\n"
+            "Здесь вы можете предложить пост для публикации в канале.",
+            call.message.chat.id,
+            call.message.message_id,
+            reply_markup=main_menu()
+        )
+        bot.answer_callback_query(call.id)
+    
+    # Обработка модерации
+    elif call.data.startswith(('approve_', 'reject_', 'ban_', 'unban_')):
+        if call.message.chat.id != ADMIN_GROUP_ID:
+            bot.answer_callback_query(call.id, "❌ Эта функция доступна только администраторам.")
+            return
+        
+        action, post_id = call.data.split('_', 1)
+        post = data["posts"].get(post_id)
+        
+        if not post:
+            bot.answer_callback_query(call.id, "❌ Пост не найден.")
+            return
+        
+        admin_username = f"@{call.from_user.username}" if call.from_user.username else call.from_user.first_name
+        
+        if action == 'approve':
+            # Публикация поста в канал
+            try:
+                if post["media_type"] == "text":
+                    bot.send_message(CHANNEL_ID, post["text"])
+                elif post["media_type"] == "photo":
+                    bot.send_photo(CHANNEL_ID, post["file_id"], caption=post["text"])
+                elif post["media_type"] == "video":
+                    bot.send_video(CHANNEL_ID, post["file_id"], caption=post["text"])
+                elif post["media_type"] == "sticker":
+                    bot.send_sticker(CHANNEL_ID, post["file_id"])
+                elif post["media_type"] == "voice":
+                    bot.send_voice(CHANNEL_ID, post["file_id"], caption=post["text"])
+                elif post["media_type"] == "video_note":
+                    bot.send_video_note(CHANNEL_ID, post["file_id"])
+                elif post["media_type"] == "media_group":
+                    if post["text"]:
+                        bot.send_message(CHANNEL_ID, post["text"])
+                
+                post["status"] = "approved"
+                post["moderated_by"] = admin_username
+                
+                # Уведомление пользователя
+                try:
+                    bot.send_message(
+                        post["user_id"],
+                        "🎉 Ваш пост опубликован!\nХотите отправить новый?",
+                        reply_markup=after_publish_menu()
+                    )
+                except:
+                    pass  # Пользователь мог заблокировать бота
+                
+            except Exception as e:
+                bot.answer_callback_query(call.id, f"❌ Ошибка публикации: {e}")
+                return
+        
+        elif action == 'reject':
+            post["status"] = "rejected"
+            post["moderated_by"] = admin_username
+            
+            # Уведомление пользователя
+            try:
+                bot.send_message(post["user_id"], "😕 Ваш пост был отклонён.")
+            except:
+                pass  # Пользователь мог заблокировать бота
+        
+        elif action == 'ban':
+            data["user_states"][str(post["user_id"])] = "banned"
+            # Замена кнопки на разблокировку
+            try:
+                bot.edit_message_reply_markup(
+                    ADMIN_GROUP_ID,
+                    call.message.message_id,
+                    reply_markup=moderation_buttons_unban(post_id)
+                )
+            except:
+                pass
+            bot.answer_callback_query(call.id, "✅ Пользователь заблокирован")
+        
+        elif action == 'unban':
+            if str(post["user_id"]) in data["user_states"]:
+                del data["user_states"][str(post["user_id"])]
+            # Замена кнопки на блокировку
+            try:
+                bot.edit_message_reply_markup(
+                    ADMIN_GROUP_ID,
+                    call.message.message_id,
+                    reply_markup=moderation_buttons(post_id)
+                )
+            except:
+                pass
+            bot.answer_callback_query(call.id, "✅ Пользователь разблокирован")
+        
+        # Обновление сообщения в группе модерации только для текстовых сообщений
+        if action in ['approve', 'reject']:
+            try:
+                # Получаем текущий текст сообщения
+                current_text = call.message.text or call.message.caption or ""
+                
+                status_text = {
+                    'approve': f"✅ Принято {admin_username}",
+                    'reject': f"❌ Отклонено {admin_username}"
+                }.get(action, "")
+                
+                new_text = f"{current_text}\n\n{status_text}"
+                
+                # Пытаемся отредактировать сообщение
+                if call.message.text:  # Текстовое сообщение
+                    bot.edit_message_text(
+                        new_text,
+                        ADMIN_GROUP_ID,
+                        call.message.message_id,
+                        reply_markup=None
+                    )
+                elif call.message.caption:  # Сообщение с медиа
+                    bot.edit_message_caption(
+                        new_text,
+                        ADMIN_GROUP_ID,
+                        call.message.message_id,
+                        reply_markup=None
+                    )
+            except Exception as e:
+                print(f"Ошибка при редактировании сообщения: {e}")
+                # Если не удалось отредактировать, просто убираем кнопки
+                try:
+                    bot.edit_message_reply_markup(
+                        ADMIN_GROUP_ID,
+                        call.message.message_id,
+                        reply_markup=None
+                    )
+                except:
+                    pass
+        
+        save_posts(data)
+        if action not in ['ban', 'unban']:
+            bot.answer_callback_query(call.id, "✅ Действие выполнено")
+
+# Обработчик текстовых сообщений
+@bot.message_handler(content_types=['text'])
+def handle_text(message):
+    data = load_posts()
+    user_id = message.from_user.id
+    
+    if str(user_id) in data.get("user_states", {}) and data["user_states"].get(str(user_id)) == "banned":
+        bot.send_message(message.chat.id, "❌ Вы заблокированы и не можете отправлять посты.")
+        return
+    
+    post_id = generate_post_id()
+    username = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
+    
+    # Сохранение поста
+    data["posts"][str(post_id)] = {
+        "user_id": user_id,
+        "username": username,
+        "text": message.text,
+        "media_type": "text",
+        "file_id": None,
+        "status": "pending",
+        "date": datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
+    }
+    
+    # Отправка в группу модерации
+    admin_message = bot.send_message(
+        ADMIN_GROUP_ID,
+        f"👤 {username} (ID {user_id}) предложил пост #{post_id}\n\n{message.text}",
+        reply_markup=moderation_buttons(post_id)
+    )
+    
+    data["posts"][str(post_id)]["admin_message_id"] = admin_message.message_id
+    save_posts(data)
+    
+    bot.send_message(
+        message.chat.id,
+        "✅ Пост отправлен на модерацию!",
+        reply_markup=main_menu()
+    )
+
+# Обработчик фото
+@bot.message_handler(content_types=['photo'])
+def handle_photo(message):
+    process_media(message, 'photo')
+
+# Обработчик видео
+@bot.message_handler(content_types=['video'])
+def handle_video(message):
+    process_media(message, 'video')
+
+# Обработчик стикеров
+@bot.message_handler(content_types=['sticker'])
+def handle_sticker(message):
+    process_media(message, 'sticker')
+
+# Обработчик голосовых сообщений
+@bot.message_handler(content_types=['voice'])
+def handle_voice(message):
+    process_media(message, 'voice')
+
+# Обработчик видео-заметок
+@bot.message_handler(content_types=['video_note'])
+def handle_video_note(message):
+    process_media(message, 'video_note')
+
+# Общий обработчик медиа
+def process_media(message, media_type):
+    data = load_posts()
+    user_id = message.from_user.id
+    
+    if str(user_id) in data.get("user_states", {}) and data["user_states"].get(str(user_id)) == "banned":
+        bot.send_message(message.chat.id, "❌ Вы заблокированы и не можете отправлять посты.")
+        return
+    
+    post_id = generate_post_id()
+    username = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
+    
+    # Получение file_id в зависимости от типа медиа
+    file_id = None
+    if media_type == 'photo':
+        file_id = message.photo[-1].file_id
+    elif media_type == 'video':
+        file_id = message.video.file_id
+    elif media_type == 'sticker':
+        file_id = message.sticker.file_id
+    elif media_type == 'voice':
+        file_id = message.voice.file_id
+    elif media_type == 'video_note':
+        file_id = message.video_note.file_id
+    
+    # Сохранение поста
+    data["posts"][str(post_id)] = {
+        "user_id": user_id,
+        "username": username,
+        "text": message.caption or "",
+        "media_type": media_type,
+        "file_id": file_id,
+        "status": "pending",
+        "date": datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
+    }
+    
+    # Отправка в группу модерации
+    media_names = {
+        'photo': 'фото',
+        'video': 'видео', 
+        'sticker': 'стикер',
+        'voice': 'голосовое сообщение',
+        'video_note': 'видео-заметка'
+    }
+    
+    caption_text = f"\n\n{message.caption}" if message.caption else ""
+    admin_text = f"👤 {username} (ID {user_id}) предложил пост #{post_id} ({media_names[media_type]}){caption_text}"
+    
+    # Отправка соответствующего типа медиа в группу модерации
+    try:
+        if media_type == 'photo':
+            admin_message = bot.send_photo(ADMIN_GROUP_ID, file_id, caption=admin_text, reply_markup=moderation_buttons(post_id))
+        elif media_type == 'video':
+            admin_message = bot.send_video(ADMIN_GROUP_ID, file_id, caption=admin_text, reply_markup=moderation_buttons(post_id))
+        elif media_type == 'sticker':
+            msg1 = bot.send_sticker(ADMIN_GROUP_ID, file_id)
+            admin_message = bot.send_message(ADMIN_GROUP_ID, admin_text, reply_markup=moderation_buttons(post_id))
+        elif media_type == 'voice':
+            admin_message = bot.send_voice(ADMIN_GROUP_ID, file_id, caption=admin_text, reply_markup=moderation_buttons(post_id))
+        elif media_type == 'video_note':
+            msg1 = bot.send_video_note(ADMIN_GROUP_ID, file_id)
+            admin_message = bot.send_message(ADMIN_GROUP_ID, admin_text, reply_markup=moderation_buttons(post_id))
+    except Exception as e:
+        # Если не удалось отправить с медиа, отправляем текстовое сообщение
+        admin_message = bot.send_message(ADMIN_GROUP_ID, admin_text, reply_markup=moderation_buttons(post_id))
+    
+    data["posts"][str(post_id)]["admin_message_id"] = admin_message.message_id
+    save_posts(data)
+    
+    bot.send_message(
+        message.chat.id,
+        f"✅ {media_names[media_type].capitalize()} отправлено на модерацию!",
+        reply_markup=main_menu()
+    )
+
+# Обработчик медиа-групп (альбомов)
+@bot.message_handler(content_types=['media_group'])
+def handle_media_group(message):
+    data = load_posts()
+    user_id = message.from_user.id
+    
+    if str(user_id) in data.get("user_states", {}) and data["user_states"].get(str(user_id)) == "banned":
+        bot.send_message(message.chat.id, "❌ Вы заблокированы и не можете отправлять посты.")
+        return
+    
+    # Для медиа-групп обрабатываем только первое сообщение
+    if message.media_group_id:
+        # Проверяем, не обрабатывали ли мы уже эту группу
+        for post in data["posts"].values():
+            if post.get("media_group_id") == message.media_group_id:
+                return
+    
+    post_id = generate_post_id()
+    username = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
+    
+    # Сохранение поста
+    data["posts"][str(post_id)] = {
+        "user_id": user_id,
+        "username": username,
+        "text": message.caption or "",
+        "media_type": "media_group",
+        "file_id": None,
+        "media_group_id": message.media_group_id,
+        "status": "pending",
+        "date": datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
+    }
+    
+    # Отправка в группу модерации
+    caption_text = f"\n\n{message.caption}" if message.caption else ""
+    admin_message = bot.send_message(
+        ADMIN_GROUP_ID,
+        f"👤 {username} (ID {user_id}) предложил пост #{post_id} (медиа-альбом){caption_text}",
+        reply_markup=moderation_buttons(post_id)
+    )
+    
+    data["posts"][str(post_id)]["admin_message_id"] = admin_message.message_id
+    save_posts(data)
+    
+    bot.send_message(
+        message.chat.id,
+        "✅ Медиа-альбом отправлен на модерацию!",
+        reply_markup=main_menu()
+    )
+
+# Запуск бота
+if __name__ == "__main__":
+    print("Бот запущен...")
+    bot.infinity_polling()
