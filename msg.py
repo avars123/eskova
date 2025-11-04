@@ -218,6 +218,61 @@ def get_top_users():
         send_error_to_admins(f"Ошибка получения топа: {e}")
         return []
 
+
+
+# НОВАЯ ФУНКЦИЯ: Анонимные сообщения пользователям
+@bot.message_handler(commands=['msg'])
+def send_anonymous_message(message):
+    try:
+        # Проверяем, что команда отправлена в группе админов
+        if message.chat.id != ADMIN_GROUP_ID:
+            bot.send_message(message.chat.id, "❌ Эта команда доступна только в группе админов.")
+            return
+        
+        # Разбираем команду: /msg ID_пользователя текст сообщения
+        parts = message.text.split(' ', 2)
+        if len(parts) < 3:
+            bot.send_message(message.chat.id, "❌ Неверный формат команды. Используйте: /msg ID_пользователя текст_сообщения")
+            return
+        
+        user_id = parts[1]
+        msg_text = parts[2]
+        
+        # Проверяем, что ID пользователя - число
+        if not user_id.isdigit():
+            bot.send_message(message.chat.id, "❌ ID пользователя должен быть числом.")
+            return
+        
+        user_id = int(user_id)
+        admin_info = get_admin_info(message.from_user)
+        
+        try:
+            # Отправляем сообщение пользователю
+            bot.send_message(
+                user_id,
+                f"💌 Сообщение от команды канала:\n\n{msg_text}\n\n"
+                f"📅 {datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}"
+            )
+            
+            # Уведомляем админа об успешной отправке
+            bot.send_message(
+                ADMIN_GROUP_ID,
+                f"✅ Сообщение отправлено пользователю ID: {user_id}\n\n"
+                f"Текст: {msg_text}\n\n"
+                f"Отправил: {admin_info}",
+                reply_to_message_id=message.message_id
+            )
+            
+        except Exception as e:
+            error_msg = f"Не удалось отправить сообщение пользователю {user_id}: {e}"
+            bot.send_message(ADMIN_GROUP_ID, f"❌ {error_msg}")
+            send_error_to_admins(error_msg, f"Admin: {admin_info}")
+            
+    except Exception as e:
+        error_msg = f"Ошибка в команде /msg: {e}"
+        send_error_to_admins(error_msg, f"Admin ID: {message.from_user.id}")
+        bot.send_message(message.chat.id, "❌ Ошибка при отправке сообщения.")
+
 # Функция для статистики
 def get_stats():
     try:
@@ -1253,58 +1308,7 @@ def process_media(message, media_type):
         send_error_to_admins(error_msg, f"User ID: {message.from_user.id}")
         bot.send_message(message.chat.id, f"❌ Ошибка при отправке {media_type}.")
 
-# НОВАЯ ФУНКЦИЯ: Анонимные сообщения пользователям
-@bot.message_handler(commands=['msg'])
-def send_anonymous_message(message):
-    try:
-        # Проверяем, что команда отправлена в группе админов
-        if message.chat.id != ADMIN_GROUP_ID:
-            bot.send_message(message.chat.id, "❌ Эта команда доступна только в группе админов.")
-            return
-        
-        # Разбираем команду: /msg ID_пользователя текст сообщения
-        parts = message.text.split(' ', 2)
-        if len(parts) < 3:
-            bot.send_message(message.chat.id, "❌ Неверный формат команды. Используйте: /msg ID_пользователя текст_сообщения")
-            return
-        
-        user_id = parts[1]
-        msg_text = parts[2]
-        
-        # Проверяем, что ID пользователя - число
-        if not user_id.isdigit():
-            bot.send_message(message.chat.id, "❌ ID пользователя должен быть числом.")
-            return
-        
-        user_id = int(user_id)
-        admin_info = get_admin_info(message.from_user)
-        
-        try:
-            # Отправляем сообщение пользователю
-            bot.send_message(
-                user_id,
-                f"💌 Сообщение от команды канала:\n\n{msg_text}\n\n"
-                f"📅 {datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}"
-            )
-            
-            # Уведомляем админа об успешной отправке
-            bot.send_message(
-                ADMIN_GROUP_ID,
-                f"✅ Сообщение отправлено пользователю ID: {user_id}\n\n"
-                f"Текст: {msg_text}\n\n"
-                f"Отправил: {admin_info}",
-                reply_to_message_id=message.message_id
-            )
-            
-        except Exception as e:
-            error_msg = f"Не удалось отправить сообщение пользователю {user_id}: {e}"
-            bot.send_message(ADMIN_GROUP_ID, f"❌ {error_msg}")
-            send_error_to_admins(error_msg, f"Admin: {admin_info}")
-            
-    except Exception as e:
-        error_msg = f"Ошибка в команде /msg: {e}"
-        send_error_to_admins(error_msg, f"Admin ID: {message.from_user.id}")
-        bot.send_message(message.chat.id, "❌ Ошибка при отправке сообщения.")
+
 
 # Запуск бота
 if __name__ == "__main__":
