@@ -227,6 +227,7 @@ def get_admin_rights_buttons(user_id, current_rights=None):
     if current_rights is None:
         current_rights = admin_rights_selections.get(user_id, {})
     
+    # Правильные названия прав для каналов в Telegram Bot API
     rights_options = {
         'can_change_info': '✏️ Изменять инфо',
         'can_post_messages': '📝 Публиковать посты', 
@@ -332,21 +333,24 @@ def handle_admin_toggle(call):
             return
         
         user_id = int(parts[2])
-        right = parts[3]
+        right = '_'.join(parts[3:])  # Объединяем оставшиеся части для правильного названия права
         
         # Переключаем выбранное право
         if user_id in admin_rights_selections:
-            admin_rights_selections[user_id][right] = not admin_rights_selections[user_id][right]
-            
-            # Обновляем сообщение с новыми кнопками
-            bot.edit_message_text(
-                call.message.text,
-                ADMIN_GROUP_ID,
-                call.message.message_id,
-                reply_markup=get_admin_rights_buttons(user_id, admin_rights_selections[user_id])
-            )
-            
-            bot.answer_callback_query(call.id, "✅ Право обновлено")
+            # Проверяем, что право существует
+            if right in admin_rights_selections[user_id]:
+                admin_rights_selections[user_id][right] = not admin_rights_selections[user_id][right]
+                
+                # Обновляем сообщение с новыми кнопками
+                bot.edit_message_reply_markup(
+                    ADMIN_GROUP_ID,
+                    call.message.message_id,
+                    reply_markup=get_admin_rights_buttons(user_id, admin_rights_selections[user_id])
+                )
+                
+                bot.answer_callback_query(call.id, "✅ Право обновлено")
+            else:
+                bot.answer_callback_query(call.id, "❌ Неизвестное право")
         else:
             bot.answer_callback_query(call.id, "❌ Сессия устарела")
             
