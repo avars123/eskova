@@ -8,7 +8,7 @@ from telebot.util import quick_markup
 
 # Константы
 BOT_TOKEN = "8354515031:AAEnTTa0qdU8teKjwMv373llShkM4alH62Q"
-ADMIN_GROUP_ID = -5026479411
+ADMIN_GROUP_ID = -1003205923977
 CHANNEL_ID = -1002658375841
 POSTS_FILE = "posts.json"
 APPLICATIONS_FILE = "admin_applications.json"
