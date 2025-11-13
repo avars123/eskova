@@ -3,22 +3,36 @@ import json
 import datetime
 import random
 import traceback
+import requests
+import google.generativeai as genai
 from telebot import TeleBot, types
 from telebot.util import quick_markup
 
 # Константы
 BOT_TOKEN = "8354515031:AAEnTTa0qdU8teKjwMv373llShkM4alH62Q"
-ADMIN_GROUP_ID = [-1003205923977, 8355791088]
+ADMIN_GROUP_ID = -1003205923977
 CHANNEL_ID = -1002658375841
 POSTS_FILE = "posts.json"
 APPLICATIONS_FILE = "admin_applications.json"
 
-# Together.ai API - ЗАМЕНИТЕ НА ВАШ РЕАЛЬНЫЙ ТОКЕН
-TOGETHER_API_TOKEN = "ваш_токен_от_together.ai_здесь"
-TOGETHER_API_URL = "https://api.together.xyz/v1/chat/completions"
+# Google Gemini API
+GEMINI_API_KEY = "AIzaSyB2B09tZ87T6uxQZP9QmPWwlnQEvyRKx6g"
 
 # Инициализация бота
 bot = TeleBot(BOT_TOKEN)
+
+# Инициализация Gemini
+try:
+    genai.configure(api_key=GEMINI_API_KEY)
+    gemini_model = genai.GenerativeModel('gemini-pro')
+    GEMINI_AVAILABLE = True
+    print("✅ Gemini API подключен успешно!")
+except Exception as e:
+    GEMINI_AVAILABLE = False
+    print(f"❌ Ошибка подключения Gemini: {e}")
+
+# Хранилище истории для нейросети
+user_history = {}
 
 # Функция для отправки ошибок в чат админов
 def send_error_to_admins(error_message, user_info=""):
@@ -119,7 +133,8 @@ def main_menu():
         '👑 Стать админом': {'callback_data': 'become_admin'},
         '🏆 Топ пользователей': {'callback_data': 'top_users'},
         'ℹ️ Помощь': {'callback_data': 'help'},
-        '📊 Статистика': {'callback_data': 'stats'}
+        '📊 Статистика': {'callback_data': 'stats'},
+        '⚖️ Юрист': {'callback_data': 'yourist'}
     }, row_width=2)
 
 # Меню после публикации
@@ -222,39 +237,33 @@ def get_top_users():
         send_error_to_admins(f"Ошибка получения топа: {e}")
         return []
 
+# Функция общения с Gemini (юрист с юмором)
+def ask_llama(user_id, prompt):
+    try:
+        if not GEMINI_AVAILABLE:
+            return generate_fallback_legal_response(prompt)
+        
+        response = gemini_model.generate_content(
+            f"Ты — опытный юрист с отличным чувством юмора. Отвечай на юридические вопросы шутливо и иронично, но при этом давай точные юридические формулировки по российскому законодательству. Используй юридические термины, ссылайся на статьи законов, но разбавляй ответы шутками, мемами и ироничными комментариями. Сохраняй профессиональный подход, но не будь скучным. Отвечай на русском языке. Вопрос: {prompt}"
+        )
+        
+        return response.text
+    except Exception as e:
+        error_msg = f"Ошибка Gemini: {e}"
+        send_error_to_admins(error_msg, f"User ID: {user_id}")
+        return generate_fallback_legal_response(prompt)
 
-# Хранилище выбранных прав для каждого пользователя
-admin_rights_selections = {}
-
-# Кнопки выбора прав с галочками
-def get_admin_rights_buttons(user_id, current_rights=None):
-    if current_rights is None:
-        current_rights = admin_rights_selections.get(user_id, {})
+def generate_fallback_legal_response(prompt):
+    """Запасная функция если Gemini не работает"""
+    legal_jokes = [
+        "⚖️ По статье 158 УК РФ - это называется 'тайное хищение'... или просто 'не будь таким доверчивым!' 😄",
+        "📝 Согласно Гражданскому кодексу... а если по-простому: подписал - отвечай, как на допросе! 🎯",
+        "🏛️ Конституция гарантирует права, но не освобождает от ответственности... как говорится, 'закон суров, но это закон!' ⚡",
+        "💼 По трудовому законодательству... или 'начальник всегда прав, даже когда неправ' - шутка юриста! 😂",
+        "🚓 Уголовный кодекс предусматривает... а народная мудрость гласит: 'не знание закона не освобождает от ответственности, а знание - иногда помогает избежать!' 🎭"
+    ]
     
-    # Правильные названия прав для каналов в Telegram Bot API
-    rights_options = {
-        'can_change_info': '✏️ Изменять инфо',
-        'can_post_messages': '📝 Публиковать посты', 
-        'can_edit_messages': '🔄 Редактировать посты',
-        'can_delete_messages': '🗑️ Удалять сообщения',
-        'can_invite_users': '👥 Приглашать пользователей',
-        'can_restrict_members': '🚫 Банить пользователей',
-        'can_pin_messages': '📌 Закреплять сообщения',
-        'can_promote_members': '👑 Назначать админов'
-    }
-    
-    buttons = {}
-    for right, label in rights_options.items():
-        icon = "✅" if current_rights.get(right, False) else "◻️"
-        buttons[f"{icon} {label}"] = {'callback_data': f'admin_toggle_{user_id}_{right}'}
-    
-    # Кнопка подтверждения
-    if any(current_rights.values()):
-        buttons['🚀 ГОТОВО'] = {'callback_data': f'admin_confirm_{user_id}'}
-    
-    buttons['❌ Отмена'] = {'callback_data': f'admin_cancel_{user_id}'}
-    
-    return quick_markup(buttons, row_width=1)
+    return f"⚖️ Юридическая консультация по вопросу: '{prompt}'\n\n{random.choice(legal_jokes)}\n\n🔍 Для точного ответа нужны детали. Рекомендую обратиться к профессиональному юристу!"
 
 # Команда /yourist для юридических консультаций (доступна всем)
 @bot.message_handler(commands=['yourist'])
@@ -349,15 +358,11 @@ def handle_lawyer_buttons(call):
         elif call.data.startswith('lawyer_clear_'):
             user_id = int(call.data.split('_')[2])
             
-            # Очищаем историю
-            if user_id in user_history:
-                del user_history[user_id]
-            
-            bot.answer_callback_query(call.id, "🧹 История диалога очищена!")
+            bot.answer_callback_query(call.id, "🧹 Готово!")
             
             # Обновляем сообщение
             bot.edit_message_text(
-                "🧹 История диалога с юристом очищена!\n\nЗадайте новый вопрос командой /yourist",
+                "🧹 Можете задать новый вопрос командой /yourist",
                 call.message.chat.id,
                 call.message.message_id,
                 reply_markup=None
@@ -424,6 +429,38 @@ def handle_lawyer_followup(message):
         error_msg = f"Ошибка в обработке уточняющего вопроса: {e}"
         send_error_to_admins(error_msg, f"User ID: {message.from_user.id}")
 
+# Хранилище выбранных прав для каждого пользователя
+admin_rights_selections = {}
+
+# Кнопки выбора прав с галочками
+def get_admin_rights_buttons(user_id, current_rights=None):
+    if current_rights is None:
+        current_rights = admin_rights_selections.get(user_id, {})
+    
+    # Правильные названия прав для каналов в Telegram Bot API
+    rights_options = {
+        'can_change_info': '✏️ Изменять инфо',
+        'can_post_messages': '📝 Публиковать посты', 
+        'can_edit_messages': '🔄 Редактировать посты',
+        'can_delete_messages': '🗑️ Удалять сообщения',
+        'can_invite_users': '👥 Приглашать пользователей',
+        'can_restrict_members': '🚫 Банить пользователей',
+        'can_pin_messages': '📌 Закреплять сообщения',
+        'can_promote_members': '👑 Назначать админов'
+    }
+    
+    buttons = {}
+    for right, label in rights_options.items():
+        icon = "✅" if current_rights.get(right, False) else "◻️"
+        buttons[f"{icon} {label}"] = {'callback_data': f'admin_toggle_{user_id}_{right}'}
+    
+    # Кнопка подтверждения
+    if any(current_rights.values()):
+        buttons['🚀 ГОТОВО'] = {'callback_data': f'admin_confirm_{user_id}'}
+    
+    buttons['❌ Отмена'] = {'callback_data': f'admin_cancel_{user_id}'}
+    
+    return quick_markup(buttons, row_width=1)
 
 # Команда /admin для назначения админа в канал
 @bot.message_handler(commands=['admin'])
@@ -894,7 +931,8 @@ def start_command(message):
             "• 👑 Подавать заявку на админа\n" 
             "• 🏆 Смотреть топ пользователей\n"
             "• 💬 Проходить собеседования\n"
-            "• 📊 Смотреть статистику\n\n"
+            "• 📊 Смотреть статистику\n"
+            "• ⚖️ Получить юридическую консультацию\n\n"
             "Выбери действие ниже:"
         )
         
@@ -920,6 +958,8 @@ def help_command(call):
             "Заполни анкету из 9 вопросов. Админы рассмотрят её и могут назначить собеседование\n\n"
             "🏆 Топ пользователей:\n"
             "Рейтинг самых активных пользователей по количеству опубликованных постов\n\n"
+            "⚖️ Юридическая консультация:\n"
+            "Команда /yourist вопрос - получите консультацию от юриста-нейросети\n\n"
             "💬 Собеседование:\n"
             "Если админы начали собеседование - просто общайся здесь, все сообщения видны команде\n\n"
             "📊 Статистика:\n"
@@ -995,6 +1035,26 @@ def show_stats(call):
         bot.answer_callback_query(call.id)
     except Exception as e:
         error_msg = f"Ошибка в stats: {e}"
+        send_error_to_admins(error_msg, f"User ID: {call.from_user.id}")
+        bot.answer_callback_query(call.id, "❌ Ошибка")
+
+# Юрист через кнопку меню
+@bot.callback_query_handler(func=lambda call: call.data == 'yourist')
+def yourist_callback(call):
+    try:
+        bot.send_message(
+            call.message.chat.id,
+            "⚖️ Юридическая консультация\n\n"
+            "Задайте ваш юридический вопрос в формате:\n"
+            "<code>/yourist ваш вопрос</code>\n\n"
+            "Пример:\n"
+            "<code>/yourist что будет если не платить за ЖКХ?</code>\n\n"
+            "🤖 Ответит AI-юрист с чувством юмора!",
+            parse_mode='HTML'
+        )
+        bot.answer_callback_query(call.id)
+    except Exception as e:
+        error_msg = f"Ошибка в yourist callback: {e}"
         send_error_to_admins(error_msg, f"User ID: {call.from_user.id}")
         bot.answer_callback_query(call.id, "❌ Ошибка")
 
@@ -1532,7 +1592,8 @@ def callback_handler(call):
                 "• 👑 Подавать заявку на админа\n" 
                 "• 🏆 Смотреть топ пользователей\n"
                 "• 💬 Проходить собеседования\n"
-                "• 📊 Смотреть статистику\n\n"
+                "• 📊 Смотреть статистику\n"
+                "• ⚖️ Получить юридическую консультацию\n\n"
                 "Выбери действие ниже:",
                 call.message.chat.id,
                 call.message.message_id,
@@ -1891,8 +1952,6 @@ def process_media(message, media_type):
         error_msg = f"Ошибка в process_media ({media_type}): {e}"
         send_error_to_admins(error_msg, f"User ID: {message.from_user.id}")
         bot.send_message(message.chat.id, f"❌ Ошибка при отправке {media_type}.")
-
-
 
 # Запуск бота
 if __name__ == "__main__":
