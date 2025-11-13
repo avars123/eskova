@@ -256,63 +256,27 @@ def get_admin_rights_buttons(user_id, current_rights=None):
     
     return quick_markup(buttons, row_width=1)
 
-# Функция общения с Together.ai (Llama-3) - юрист с юмором
-def ask_llama(user_id, prompt):
-    history = user_history.get(user_id, [])
-    history.append({"role": "user", "content": prompt})
-
-    if len(history) > 10:
-        history = history[-10:]
-
-    headers = {
-        "Authorization": f"Bearer {TOGETHER_API_TOKEN}",
-        "Content-Type": "application/json"
-    }
-
-    data = {
-        "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
-        "messages": [{
-            "role": "system", 
-            "content": "Ты — опытный юрист с отличным чувством юмора. Отвечай на юридические вопросы шутливо и иронично, но при этом давай точные юридические формулировки по закону. Используй юридические термины, ссылайся на статьи законов, но разбавляй ответы шутками, мемами и ироничными комментариями. Сохраняй профессиональный подход, но не будь скучным. Можешь использовать выражения типа 'статья такая-то гласит, что... а если простыми словами - не делай так, иначе познакомитесь с УК РФ поближе'"
-        }] + history,
-        "max_tokens": 900
-    }
-
-    try:
-        response = requests.post(TOGETHER_API_URL, headers=headers, json=data)
-        response.raise_for_status()
-        answer = response.json()["choices"][0]["message"]["content"]
-        history.append({"role": "assistant", "content": answer})
-        user_history[user_id] = history
-        return answer
-    except Exception as e:
-        return f"⚖️ Ошибка в юридической консультации: {e}\n\nПопробуйте задать вопрос позже, пока я разбираюсь с Уголовным кодексом... э-э-э, с техническими неполадками!"
-
-# Команда /yourist для юридических консультаций
+# Команда /yourist для юридических консультаций (доступна всем)
 @bot.message_handler(commands=['yourist'])
 def yourist_command(message):
     try:
-        # Проверяем, что команда отправлена в группе админов
-        if message.chat.id != ADMIN_GROUP_ID:
-            bot.send_message(message.chat.id, "❌ Эта команда доступна только в группе админов.")
-            return
-        
         # Разбираем команду: /yourist вопрос
         parts = message.text.split(' ', 1)
         if len(parts) < 2:
-            bot.send_message(message.chat.id, "❌ Неверный формат команды. Используйте: /yourist ваш_юридический_вопрос")
+            bot.send_message(message.chat.id, 
+                "❌ Неверный формат команды. Используйте: /yourist ваш_юридический_вопрос\n\n"
+                "Пример: /yourist что будет если не платить за ЖКХ?"
+            )
             return
         
         question = parts[1]
         user_id = message.from_user.id
-        admin_info = get_admin_info(message.from_user)
         
         # Отправляем сообщение о обработке
         processing_msg = bot.send_message(
-            ADMIN_GROUP_ID,
+            message.chat.id,
             f"⚖️ Юридический консультант обрабатывает вопрос...\n\n"
-            f"👤 Задал: {admin_info}\n"
-            f"❓ Вопрос: {question}\n\n"
+            f"❓ Ваш вопрос: {question}\n\n"
             f"⏳ Изучаю законодательство..."
         )
         
@@ -322,16 +286,15 @@ def yourist_command(message):
         # Форматируем ответ
         response_text = (
             f"⚖️ ЮРИДИЧЕСКАЯ КОНСУЛЬТАЦИЯ ⚖️\n\n"
-            f"👤 Вопрос от: {admin_info}\n"
-            f"❓ Вопрос: {question}\n\n"
+            f"👤 Ваш вопрос: {question}\n\n"
             f"💼 Ответ юриста:\n{answer}\n\n"
-            f"📝 Примечание: Это AI-консультация, для точных юридических действий обратитесь к профессиональному юсту."
+            f"📝 Примечание: Это AI-консультация. Для точных юридических действий обратитесь к профессиональному юристу."
         )
         
         # Редактируем сообщение с ответом
         bot.edit_message_text(
             response_text,
-            ADMIN_GROUP_ID,
+            message.chat.id,
             processing_msg.message_id
         )
         
@@ -343,15 +306,18 @@ def yourist_command(message):
         }, row_width=1)
         
         bot.send_message(
-            ADMIN_GROUP_ID,
+            message.chat.id,
             "💡 Что дальше?",
             reply_markup=follow_up_buttons
         )
             
     except Exception as e:
         error_msg = f"Ошибка в команде /yourist: {e}"
-        send_error_to_admins(error_msg, f"Admin ID: {message.from_user.id}")
-        bot.send_message(message.chat.id, "❌ Ошибка при получении юридической консультации.")
+        send_error_to_admins(error_msg, f"User ID: {message.from_user.id}")
+        bot.send_message(message.chat.id, 
+            "❌ Ошибка при получении юридической консультации. Попробуйте позже.\n\n"
+            "А пока шутка от юриста: 'Лучше иметь адвоката, чем стать клиентом исправительной системы!' 😄"
+        )
 
 # Обработчик кнопок для юридических консультаций
 @bot.callback_query_handler(func=lambda call: call.data.startswith(('lawyer_followup_', 'lawyer_clear_', 'lawyer_new')))
@@ -362,7 +328,7 @@ def handle_lawyer_buttons(call):
             
             # Запрашиваем уточняющий вопрос
             msg = bot.send_message(
-                ADMIN_GROUP_ID,
+                call.message.chat.id,
                 f"💬 Введите ваш уточняющий вопрос для юриста:",
                 reply_to_message_id=call.message.message_id
             )
@@ -373,7 +339,8 @@ def handle_lawyer_buttons(call):
                 data["user_states"] = {}
             data["user_states"][str(user_id)] = {
                 "state": "lawyer_followup",
-                "waiting_for_response": True
+                "waiting_for_response": True,
+                "chat_id": call.message.chat.id
             }
             save_applications(data)
             
@@ -391,7 +358,7 @@ def handle_lawyer_buttons(call):
             # Обновляем сообщение
             bot.edit_message_text(
                 "🧹 История диалога с юристом очищена!\n\nЗадайте новый вопрос командой /yourist",
-                ADMIN_GROUP_ID,
+                call.message.chat.id,
                 call.message.message_id,
                 reply_markup=None
             )
@@ -401,7 +368,7 @@ def handle_lawyer_buttons(call):
             
     except Exception as e:
         error_msg = f"Ошибка в обработке кнопок юриста: {e}"
-        send_error_to_admins(error_msg, f"Admin ID: {call.from_user.id}")
+        send_error_to_admins(error_msg, f"User ID: {call.from_user.id}")
         bot.answer_callback_query(call.id, "❌ Ошибка")
 
 # Обработчик уточняющих вопросов для юриста
@@ -421,14 +388,13 @@ def handle_lawyer_followup(message):
         
         if user_state.get("state") == "lawyer_followup" and user_state.get("waiting_for_response"):
             question = message.text
-            admin_info = get_admin_info(message.from_user)
+            chat_id = user_state.get("chat_id", message.chat.id)
             
             # Отправляем сообщение о обработке
             processing_msg = bot.send_message(
-                ADMIN_GROUP_ID,
+                chat_id,
                 f"⚖️ Юрист анализирует уточняющий вопрос...\n\n"
-                f"👤 От: {admin_info}\n"
-                f"❓ Вопрос: {question}\n\n"
+                f"❓ Ваш вопрос: {question}\n\n"
                 f"⏳ Изучаю нюансы..."
             )
             
@@ -438,8 +404,7 @@ def handle_lawyer_followup(message):
             # Форматируем ответ
             response_text = (
                 f"⚖️ УТОЧНЯЮЩАЯ КОНСУЛЬТАЦИЯ ⚖️\n\n"
-                f"👤 Вопрос от: {admin_info}\n"
-                f"❓ Вопрос: {question}\n\n"
+                f"👤 Ваш вопрос: {question}\n\n"
                 f"💼 Ответ юриста:\n{answer}\n\n"
                 f"📝 Примечание: Это AI-консультация"
             )
@@ -447,7 +412,7 @@ def handle_lawyer_followup(message):
             # Редактируем сообщение с ответом
             bot.edit_message_text(
                 response_text,
-                ADMIN_GROUP_ID,
+                chat_id,
                 processing_msg.message_id
             )
             
@@ -458,6 +423,7 @@ def handle_lawyer_followup(message):
     except Exception as e:
         error_msg = f"Ошибка в обработке уточняющего вопроса: {e}"
         send_error_to_admins(error_msg, f"User ID: {message.from_user.id}")
+
 
 # Команда /admin для назначения админа в канал
 @bot.message_handler(commands=['admin'])
